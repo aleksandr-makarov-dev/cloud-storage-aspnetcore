@@ -5,6 +5,9 @@ using Microsoft.Extensions.Options;
 using Minio;
 using Minio.DataModel.Args;
 using System.Linq;
+using System.Net;
+using CloudStorage.API.Modules.FileSystem.Models;
+using Minio.DataModel;
 
 namespace CloudStorage.API.Modules.FileSystem
 {
@@ -33,8 +36,8 @@ namespace CloudStorage.API.Modules.FileSystem
             return Ok(objects);
         }
 
-        [HttpPost("[action]")]
-        public async Task<IActionResult> Upload([FromQuery] string? prefix, IFormFile? file)
+        [HttpPost("Upload")]
+        public async Task<IActionResult> UploadObject([FromQuery] string? prefix, IFormFile? file)
         {
             if (file == null || file.Length == 0)
             {
@@ -54,10 +57,10 @@ namespace CloudStorage.API.Modules.FileSystem
             return Ok(new {message = "File uploaded to the bucket"});
         }
 
-        [HttpGet("[action]")]
-        public async Task<IActionResult> Download([FromQuery] string prefix)
+        [HttpGet("Download")]
+        public async Task<IActionResult> DownloadObject([FromQuery] string key)
         {
-            if (string.IsNullOrEmpty(prefix))
+            if (string.IsNullOrEmpty(key))
             {
                 return BadRequest("Prefix is required");
             }
@@ -66,7 +69,7 @@ namespace CloudStorage.API.Modules.FileSystem
 
             var getObjectArgs = new GetObjectArgs()
                 .WithBucket(_config.BucketName)
-                .WithObject(prefix)
+                .WithObject(key)
                 .WithCallbackStream((st) => st.CopyTo(stream));
 
             var obj = await _minio.GetObjectAsync(getObjectArgs);
@@ -79,6 +82,41 @@ namespace CloudStorage.API.Modules.FileSystem
             }
 
             return File(stream, obj.ContentType, obj.ObjectName);
+        }
+
+        [HttpPut("Move")]
+        public async Task<IActionResult> MoveObject([FromBody] MoveObjectRequest moveObjectRequest)
+        {
+            var copyObjectArgs = new CopyObjectArgs()
+                .WithCopyObjectSource(new CopySourceObjectArgs()
+                    .WithBucket(_config.BucketName)
+                    .WithObject(moveObjectRequest.Key))
+                .WithBucket(_config.BucketName)
+                .WithObject(moveObjectRequest.NewKey);
+
+            await _minio.CopyObjectAsync(copyObjectArgs);
+
+            var removeObjectArgs = new RemoveObjectArgs()
+                .WithBucket(_config.BucketName)
+                .WithObject(moveObjectRequest.Key);
+
+            await _minio.RemoveObjectAsync(removeObjectArgs);
+
+            return NoContent();
+        }
+
+        [HttpDelete("{key}")]
+        public async Task<IActionResult> RemoveObject(string key)
+        {
+            var decodedKey = WebUtility.UrlDecode(key);
+
+            var removeObjectArgs = new RemoveObjectArgs()
+                .WithBucket(_config.BucketName)
+                .WithObject(decodedKey);
+
+            await _minio.RemoveObjectAsync(removeObjectArgs);
+
+            return NoContent();
         }
     }
 }
